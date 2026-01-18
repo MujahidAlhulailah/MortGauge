@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mortgage AI Forecaster</title>
+    <title>MortGauge</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       /* Custom scrollbar for better aesthetics in tables */
@@ -20,6 +20,60 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #94a3b8;
+      }
+      
+      @media print {
+        @page {
+          margin: 1cm;
+          size: auto;
+        }
+        
+        /* Hide everything by default using visibility to maintain flow but hide visuals */
+        body * {
+          visibility: hidden;
+        }
+
+        /* Make the printable report and all its children visible */
+        .printable-report, .printable-report * {
+          visibility: visible;
+        }
+
+        /* Position the report at the top left of the paper */
+        .printable-report {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 100%;
+          margin: 0;
+          padding: 0;
+          background: white;
+          /* Reset height/overflow to ensure full content prints */
+          height: auto !important;
+          overflow: visible !important;
+        }
+
+        /* Ensure links aren't blue/underlined weirdly */
+        a {
+          text-decoration: none;
+          color: black;
+        }
+
+        /* Force background graphics to print for charts/colored divs */
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+
+        /* Explicitly hide elements marked to be hidden in print, even inside the visible report */
+        .print\:hidden {
+          display: none !important;
+        }
+        
+        /* Ensure charts resize or show up correctly */
+        .recharts-responsive-container {
+            width: 100% !important;
+            height: 300px !important; 
+        }
       }
     </style>
   <script type="importmap">

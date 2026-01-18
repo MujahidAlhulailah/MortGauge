@@ -57,15 +57,13 @@ export const extractIncomeFromDocument = async (base64Data: string, mimeType: st
 };
 
 export const generateScenarios = async (details: LoanDetails, incomeDetails?: IncomeDetails): Promise<AIScenario[]> => {
-  // Upgraded to use Gemini 3 Pro with Thinking
+  // Upgraded to use Gemini 3 Pro with Thinking and Search
   const model = "gemini-3-pro-preview";
   
   // Calculate specific metrics for context
   const basePayment = calculateMonthlyPayment(details.loanAmount, details.interestRate, details.loanTermYears);
   const basePaymentFormatted = basePayment.toFixed(2);
-  const oneTwelfth = (basePayment / 12).toFixed(2);
-  const roundUpTarget = (Math.ceil(basePayment / 100) * 100 + 100);
-
+  
   let incomeContext = "";
   if (incomeDetails) {
     incomeContext = `
@@ -74,13 +72,13 @@ export const generateScenarios = async (details: LoanDetails, incomeDetails?: In
     - Monthly Net Income: $${incomeDetails.monthlyNetIncome.toLocaleString()}
     - Employment: ${incomeDetails.employmentStatus}
     - Additional Info: ${incomeDetails.additionalInfo}
-    
-    Use this income data to tailor the suggestions. Ensure the suggested extra payments are realistic (e.g., affordable within the monthly net income).
     `;
   }
 
   const prompt = `
-    Analyze the following mortgage scenario:
+    First, perform a Google Search to identify current US mortgage interest rates (30-year fixed) and the general economic outlook regarding inflation and Federal Reserve rate decisions.
+
+    Then, analyze the following mortgage scenario:
     - Loan Principal: $${details.loanAmount}
     - Annual Interest Rate: ${details.interestRate}%
     - Loan Term: ${details.loanTermYears} years
@@ -89,17 +87,14 @@ export const generateScenarios = async (details: LoanDetails, incomeDetails?: In
     
     Act as a sophisticated financial advisor. Generate 3 distinct, creative, and realistic "what-if" payoff strategies.
     
+    Consider the LIVE economic data you found. For example, if rates are high, emphasize guaranteed return on equity. If rates are dropping, mention refinancing possibilities in the reasoning (but still provide payoff strategies).
+
     Given the loan size and rate, focus on strategies that move the needle but are strictly feasible for the borrower if income data is provided.
-    
-    Common strategies to consider adapting:
-    1. "The 1/12th Accelerator" (Paying extra equivalent to 1 extra payment a year).
-    2. "The Round-Up Strategy" (Rounding up to a clean number).
-    3. "Aggressive Equity Builder" or "Bonus Allocation" (for high income/bonus scenarios).
     
     For each scenario, provide:
     - A catchy title.
     - A clear description.
-    - The reasoning: Why this works mathematically and why it fits this user's profile.
+    - The reasoning: Why this works mathematically, how it fits the CURRENT economic environment, and why it fits this user's profile.
     - A suggested additional monthly payment amount.
     - Optionally a suggested one-time lump sum.
     
@@ -111,6 +106,7 @@ export const generateScenarios = async (details: LoanDetails, incomeDetails?: In
       model: model,
       contents: prompt,
       config: {
+        tools: [{ googleSearch: {} }],
         thinkingConfig: { thinkingBudget: 32768 },
         responseMimeType: "application/json",
         responseSchema: {
@@ -172,6 +168,13 @@ export const generateAdvisorReport = async (
   const prompt = `
     You are a Senior Mortgage Financial Consultant preparing a formal strategy report for a client.
     
+    Step 1: Perform a Google Search to get LIVE data on:
+    - Current 30-year Fixed Mortgage Rates in the US.
+    - Recent Federal Reserve interest rate decisions and future outlook.
+    - Current CPI/Inflation trends.
+    
+    Step 2: Analyze the Client Profile using the live data context.
+    
     CLIENT LOAN PROFILE:
     - Principal: $${details.loanAmount.toLocaleString()}
     - Rate: ${details.interestRate}%
@@ -194,20 +197,19 @@ export const generateAdvisorReport = async (
     TASK:
     Write a comprehensive, professional financial report analyzing this specific strategy. 
     
-    CRITICAL: Contextualize the advice based on the Income Data if available. 
-    - Is the extra payment affordable given the Monthly Net Income? 
-    - Does the strategy align with their employment status (e.g., variable income vs steady)?
+    CRITICAL: 
+    - Contextualize the advice based on the Income Data if available.
+    - Integrate the LIVE economic data. Compare the user's rate (${details.interestRate}%) to current market rates. 
     
-    If no extra payments are set, respectfully analyze the standard schedule and suggest improvements based on their specific income capacity.
-
     The report must be structured into JSON with the following sections:
     1. Executive Summary
-    2. Income & Affordability Analysis (Specific check against their provided income)
-    3. Strategy Analysis
-    4. Financial Impact
-    5. Risk Assessment & Opportunity Cost
-    6. Final Recommendation
-    7. Disclaimer
+    2. Market Context & Economic Environment (Detailed analysis of current rates, inflation, and how the user's loan compares).
+    3. Income & Affordability Analysis (Specific check against their provided income).
+    4. Strategy Analysis.
+    5. Financial Impact.
+    6. Risk Assessment & Opportunity Cost (Consider high-yield savings rates found in your search vs paying down debt).
+    7. Final Recommendation.
+    8. Disclaimer.
 
     Use the thinking process to evaluate affordability and mathematical impact deeply.
   `;
@@ -217,6 +219,7 @@ export const generateAdvisorReport = async (
       model: model,
       contents: prompt,
       config: {
+        tools: [{ googleSearch: {} }],
         thinkingConfig: { thinkingBudget: 32768 },
         responseMimeType: "application/json",
         responseSchema: {
@@ -246,6 +249,15 @@ export const generateAdvisorReport = async (
     
     const data = JSON.parse(text) as AdvisorReportData;
     if (!data.generatedDate) data.generatedDate = new Date().toLocaleDateString();
+
+    // Extract sources from grounding metadata
+    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks
+      ?.map(chunk => chunk.web ? { title: chunk.web.title, uri: chunk.web.uri } : null)
+      .filter((s): s is { title: string; uri: string } => s !== null && !!s.uri);
+    
+    if (sources && sources.length > 0) {
+      data.sources = sources;
+    }
     
     return data;
   } catch (error) {

@@ -63,6 +63,7 @@ export interface AdvisorReportData {
   title: string;
   sections: AdvisorReportSection[];
   generatedDate: string;
+  sources?: { title: string; uri: string }[];
 }
 
 export interface IncomeDetails {
@@ -71,4 +72,5 @@ export interface IncomeDetails {
   creditScore: number;
   employmentStatus: string;
   additionalInfo: string;
+  uploadedFileName?: string | null;
 }
