@@ -1,0 +1,5 @@
+{
+  "name": "Mortgage AI Forecaster",
+  "description": "A dynamic mortgage calculator with AI-powered scenario generation, allowing users to compare minimum payments against accelerated payoff strategies with rich visualizations.",
+  "requestFramePermissions": []
+}
