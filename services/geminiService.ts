@@ -11,7 +11,7 @@ export const extractIncomeFromDocument = async (documents: UploadedDocument[]): 
     Analyze the provided financial documents (pay stubs, tax returns, bank statements, etc.) for a single user.
     
     TASK:
-    1. Extract financial details: Annual Gross Income, Monthly Net Income, Credit Score, Employment Status.
+    1. Extract financial details: Annual Gross Income, Monthly Net Income..
     2. CONSOLIDATION LOGIC:
        - If multiple documents provide conflicting information (e.g., an old pay stub vs a new one), PRIORITIZE the document with the most recent date.
        - If documents complement each other (e.g., one shows income, another shows credit score), merge the data.
