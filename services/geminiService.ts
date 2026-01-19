@@ -1,37 +1,47 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { LoanDetails, AIScenario, ExtraPayments, ComparisonResult, AdvisorReportData, IncomeDetails } from "../types";
+import { LoanDetails, AIScenario, ExtraPayments, ComparisonResult, AdvisorReportData, IncomeDetails, UploadedDocument } from "../types";
 import { calculateMonthlyPayment } from "./mortgageCalculator";
 
 const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-export const extractIncomeFromDocument = async (base64Data: string, mimeType: string): Promise<Partial<IncomeDetails>> => {
+export const extractIncomeFromDocument = async (documents: UploadedDocument[]): Promise<Partial<IncomeDetails>> => {
   const model = "gemini-3-pro-preview";
   
   const prompt = `
-    Analyze the provided document (image/PDF) which is likely a pay stub, tax return, bank statement, or employment verification.
+    Analyze the provided financial documents (pay stubs, tax returns, bank statements, etc.) for a single user.
     
-    Extract the following financial details:
-    - Annual Gross Income (Estimate if only monthly is available)
-    - Monthly Net Income
-    - Credit Score (if visible)
-    - Employment Status (e.g., Employed, Self-Employed, Contractor)
-    - Any other relevant financial context (bonuses, commissions, debts mentioned)
+    TASK:
+    1. Extract financial details: Annual Gross Income, Monthly Net Income, Credit Score, Employment Status.
+    2. CONSOLIDATION LOGIC:
+       - If multiple documents provide conflicting information (e.g., an old pay stub vs a new one), PRIORITIZE the document with the most recent date.
+       - If documents complement each other (e.g., one shows income, another shows credit score), merge the data.
+       - Calculate Annual Gross Income based on the most reliable source (e.g., YTD on a recent pay stub extrapolated, or tax return if recent).
+    3. CONFLICT REPORTING:
+       - If you find significant discrepancies or ambiguities that you had to resolve (e.g., "Paystub says $5k/mo but Bank Statement says $3k deposit"), describe this clearly in the 'analysisNotes' field.
+       - If the data is consistent, 'analysisNotes' can remain empty or state "Data consistent across documents."
     
-    Return a JSON object with keys: annualGrossIncome (number), monthlyNetIncome (number), creditScore (number), employmentStatus (string), additionalInfo (string).
-    If a field is not found, leave it null or 0.
+    Return a JSON object with keys: 
+    - annualGrossIncome (number)
+    - monthlyNetIncome (number)
+    - creditScore (number)
+    - employmentStatus (string)
+    - additionalInfo (string: any extra financial context found like bonuses/debts)
+    - analysisNotes (string: explanation of how data was consolidated or conflicts found)
   `;
+
+  // Construct parts for all documents
+  const parts: any[] = documents.map(doc => ({
+    inlineData: { mimeType: doc.mimeType, data: doc.data }
+  }));
+  
+  parts.push({ text: prompt });
 
   try {
     const response = await genAI.models.generateContent({
       model: model,
-      contents: {
-        parts: [
-          { inlineData: { mimeType, data: base64Data } },
-          { text: prompt }
-        ]
-      },
+      contents: { parts },
       config: {
-        thinkingConfig: { thinkingBudget: 1024 }, // Lower budget for extraction task
+        // thinkingConfig removed for speed as requested
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -40,7 +50,8 @@ export const extractIncomeFromDocument = async (base64Data: string, mimeType: st
             monthlyNetIncome: { type: Type.NUMBER },
             creditScore: { type: Type.NUMBER },
             employmentStatus: { type: Type.STRING },
-            additionalInfo: { type: Type.STRING }
+            additionalInfo: { type: Type.STRING },
+            analysisNotes: { type: Type.STRING }
           }
         }
       }

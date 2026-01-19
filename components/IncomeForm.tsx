@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
-import { IncomeDetails } from '../types';
+import { IncomeDetails, UploadedDocument } from '../types';
 import { extractIncomeFromDocument } from '../services/geminiService';
-import { Wallet, Upload, Sparkles, Loader2, AlertCircle, FileText, X } from 'lucide-react';
+import { Wallet, Upload, Sparkles, Loader2, AlertCircle, FileText, X, AlertTriangle } from 'lucide-react';
 
 interface IncomeFormProps {
   incomeDetails: IncomeDetails;
@@ -21,55 +21,87 @@ export const IncomeForm: React.FC<IncomeFormProps> = ({ incomeDetails, setIncome
     setIncomeDetails(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
-      setError('Please upload an image or PDF file.');
-      return;
-    }
+  const processFiles = async (files: FileList) => {
+    if (files.length === 0) return;
     
     setError(null);
     setIsExtracting(true);
 
+    const newDocs: UploadedDocument[] = [];
+    const readers: Promise<void>[] = [];
+
+    // Read all files
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+        // Skip invalid types, maybe warn
+        return;
+      }
+      
+      const p = new Promise<void>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64String = (reader.result as string).split(',')[1];
+          newDocs.push({
+            id: Math.random().toString(36).substr(2, 9),
+            name: file.name,
+            mimeType: file.type,
+            data: base64String
+          });
+          resolve();
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      readers.push(p);
+    });
+
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        const extractedData = await extractIncomeFromDocument(base64String, file.type);
-        
-        setIncomeDetails(prev => ({
-          ...prev,
-          annualGrossIncome: extractedData.annualGrossIncome || prev.annualGrossIncome,
-          monthlyNetIncome: extractedData.monthlyNetIncome || prev.monthlyNetIncome,
-          creditScore: extractedData.creditScore || prev.creditScore,
-          employmentStatus: extractedData.employmentStatus || prev.employmentStatus,
-          additionalInfo: (prev.additionalInfo + (extractedData.additionalInfo ? `\nExtracted Note: ${extractedData.additionalInfo}` : "")).trim(),
-          uploadedFileName: file.name
-        }));
-        
-        setIsExtracting(false);
-      };
-      reader.readAsDataURL(file);
+      await Promise.all(readers);
+      
+      // Merge with existing docs (or replace? user might want to add more. Let's append)
+      const allDocs = [...incomeDetails.documents, ...newDocs];
+      
+      // Update state with new docs immediately so user sees them
+      setIncomeDetails(prev => ({ ...prev, documents: allDocs }));
+      
+      // Now Analyze ALL documents together to get consolidated info
+      const extractedData = await extractIncomeFromDocument(allDocs);
+      
+      setIncomeDetails(prev => ({
+        ...prev,
+        // Update fields if they were found, otherwise keep existing
+        annualGrossIncome: extractedData.annualGrossIncome || prev.annualGrossIncome,
+        monthlyNetIncome: extractedData.monthlyNetIncome || prev.monthlyNetIncome,
+        creditScore: extractedData.creditScore || prev.creditScore,
+        employmentStatus: extractedData.employmentStatus || prev.employmentStatus,
+        additionalInfo: (prev.additionalInfo + (extractedData.additionalInfo ? `\nExtracted Note: ${extractedData.additionalInfo}` : "")).trim(),
+        analysisNotes: extractedData.analysisNotes // Capture conflict notes
+      }));
+      
     } catch (err) {
       console.error(err);
-      setError("Failed to process document.");
+      setError("Failed to process documents.");
+    } finally {
       setIsExtracting(false);
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const handleRemoveFile = () => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      processFiles(e.target.files);
+    }
+  };
+
+  const handleRemoveFile = (id: string) => {
     setIncomeDetails(prev => ({
       ...prev,
-      uploadedFileName: null
-      // We do not clear the extracted fields as the user might have edited them, 
-      // but we remove the file association.
+      documents: prev.documents.filter(d => d.id !== id),
+      // We don't clear the extracted data automatically because the user might have manually edited it,
+      // and removing a file doesn't necessarily mean the data derived from it is wrong now.
+      // But we could clear the analysisNotes if we wanted.
     }));
-    // Reset file input so same file can be selected again if needed
-    if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-    }
   };
 
   return (
@@ -89,44 +121,22 @@ export const IncomeForm: React.FC<IncomeFormProps> = ({ incomeDetails, setIncome
         {/* AI Extraction Section */}
         <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-xl transition-all duration-300">
           
-          {incomeDetails.uploadedFileName ? (
-            <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-indigo-100 shadow-sm">
-                <div className="flex items-center space-x-3">
-                <div className="bg-indigo-100 p-2 rounded-lg">
-                    <FileText className="w-5 h-5 text-indigo-600" />
-                </div>
-                <div>
-                    <p className="text-sm font-medium text-slate-700">{incomeDetails.uploadedFileName}</p>
-                    <p className="text-xs text-emerald-600 flex items-center mt-0.5">
-                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mr-1.5 animate-pulse"></span>
-                    Analyzed & Populated
-                    </p>
-                </div>
-                </div>
-                <button 
-                onClick={handleRemoveFile}
-                className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-full transition"
-                title="Remove file from AI consideration"
-                >
-                <X className="w-5 h-5" />
-                </button>
-            </div>
-          ) : (
-             <div className="flex items-start justify-between">
-                <div>
+          <div className="flex items-start justify-between mb-4">
+              <div>
                 <h3 className="text-sm font-bold text-indigo-900 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-indigo-600" />
                     Auto-Fill with AI
                 </h3>
                 <p className="text-xs text-indigo-700 mt-1 max-w-sm">
-                    Upload a pay stub, tax return summary, or bank statement. Our AI will extract key figures to populate the form below.
+                    Upload multiple pay stubs, tax summaries, or statements. We'll consolidate the data and prioritize recent info.
                 </p>
-                </div>
-                <div className="relative">
+              </div>
+              <div className="relative">
                 <input 
                     type="file" 
                     ref={fileInputRef}
                     className="hidden" 
+                    multiple
                     accept="image/*,application/pdf"
                     onChange={handleFileUpload}
                 />
@@ -136,12 +146,45 @@ export const IncomeForm: React.FC<IncomeFormProps> = ({ incomeDetails, setIncome
                     className="flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium rounded-lg transition disabled:opacity-50"
                 >
                     {isExtracting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
-                    {isExtracting ? "Analyzing..." : "Upload Document"}
+                    {isExtracting ? "Analyzing..." : "Upload Documents"}
                 </button>
-                </div>
-            </div>
+              </div>
+          </div>
+
+          {/* List of uploaded files */}
+          {incomeDetails.documents.length > 0 && (
+             <div className="space-y-2 mb-4">
+                {incomeDetails.documents.map(doc => (
+                  <div key={doc.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-indigo-100 shadow-sm">
+                    <div className="flex items-center space-x-3 overflow-hidden">
+                      <div className="bg-indigo-100 p-1.5 rounded-lg flex-shrink-0">
+                          <FileText className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-700 truncate">{doc.name}</p>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveFile(doc.id)}
+                      className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-full transition ml-2"
+                      title="Remove file"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+             </div>
           )}
           
+          {/* Analysis Notes / Conflicts */}
+          {incomeDetails.analysisNotes && (
+             <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start">
+                <AlertTriangle className="w-5 h-5 text-amber-500 mr-2 flex-shrink-0 mt-0.5" />
+                <div>
+                   <h4 className="text-xs font-bold text-amber-800 uppercase mb-1">AI Analysis Report</h4>
+                   <p className="text-xs text-amber-700 leading-relaxed">{incomeDetails.analysisNotes}</p>
+                </div>
+             </div>
+          )}
+
           {error && (
             <div className="flex items-center gap-2 mt-3 text-xs text-red-600 bg-red-50 p-2 rounded">
               <AlertCircle className="w-4 h-4" /> {error}

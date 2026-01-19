@@ -66,11 +66,19 @@ export interface AdvisorReportData {
   sources?: { title: string; uri: string }[];
 }
 
+export interface UploadedDocument {
+  id: string;
+  name: string;
+  mimeType: string;
+  data: string; // base64
+}
+
 export interface IncomeDetails {
   annualGrossIncome: number;
   monthlyNetIncome: number;
   creditScore: number;
   employmentStatus: string;
   additionalInfo: string;
-  uploadedFileName?: string | null;
+  documents: UploadedDocument[];
+  analysisNotes?: string; // For AI to report conflicts or logic used
 }
